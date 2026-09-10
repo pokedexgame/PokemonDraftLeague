@@ -10,15 +10,29 @@ const ROSTER_SIZE = 6;
 const TOTAL_PICKS = TEAM_COUNT * ROSTER_SIZE;
 const LEGENDARY_IDS = new Set([144,145,146,150,151]);
 const KANTO_FINAL_STARTERS = new Set([3,6,9]);
+const KANTO_EEVEELUTIONS = new Set([134,135,136]);
 
 const CHALLENGES = [
+  { id:'first_season', code:'FS', name:'First Steps', description:'Complete your first league season.' },
+  { id:'playoff_bound', code:'PB', name:'Playoff Bound', description:'Qualify for the playoffs.' },
+  { id:'double_digits', code:'10', name:'Double Digits', description:'Win at least 10 regular-season matches in one season.' },
+  { id:'top_seed', code:'1', name:'Top Seed', description:'Finish the regular season as the number 1 playoff seed.' },
+  { id:'clean_sweep', code:'6-0', name:'Clean Sweep', description:'Win a regular-season match 6-0.' },
+  { id:'hot_streak', code:'5W', name:'Hot Streak', description:'Win at least five consecutive regular-season matches.' },
+  { id:'league_mvp', code:'MV', name:'MVP Maker', description:'Have one of your Pokémon win the League MVP award.' },
+  { id:'ace_trainer', code:'12', name:'Ace Trainer', description:'Have one Pokémon win at least 12 individual battles in one season, including playoffs.' },
   { id:'no_legends', code:'NL', name:'No Legends', description:'Win a championship without drafting Articuno, Zapdos, Moltres, Mewtwo or Mew.' },
   { id:'professor_oak', code:'PO', name:'Professor Oak', description:'Win a championship with at least six unique types represented on your roster.' },
   { id:'underdogs', code:'UD', name:'Underdogs', description:'Win a championship without drafting any Pokémon projected in the top 10.' },
   { id:'kanto_starter', code:'KS', name:'Kanto Starter', description:'Win a championship with Venusaur, Charizard or Blastoise on your roster.' },
   { id:'mono_master', code:'MM', name:'Mono Master', description:'Win a championship with at least three Pokémon sharing the same type.' },
   { id:'perfect_season', code:'14', name:'Perfect Season', description:'Finish the regular season 14-0 and win the championship.' },
-  { id:'from_bottom', code:'4', name:'From the Bottom', description:'Win the championship as the number 4 playoff seed.' }
+  { id:'from_bottom', code:'4', name:'From the Bottom', description:'Win the championship as the number 4 playoff seed.' },
+  { id:'kanto_trio', code:'KT', name:'Kanto Trio', description:'Win a championship with Venusaur, Charizard and Blastoise on your roster.' },
+  { id:'eevee_elite', code:'EE', name:'Eevee Elite', description:'Win a championship with Vaporeon, Jolteon and Flareon on your roster.' },
+  { id:'pikachu_power', code:'PP', name:'Pikachu Power', description:'Win a championship with Pikachu on your roster.' },
+  { id:'dynasty', code:'DY', name:'Dynasty', description:'Win three championships across your career.' },
+  { id:'century_club', code:'100', name:'Century Club', description:'Win 100 regular-season matches across your career.' }
 ];
 
 const app = document.getElementById('app');
@@ -237,7 +251,7 @@ function trainerBadgeHTML(challenge,earned=false,size=''){
 
 function renderChallenges(){
   const earnedCount=Object.keys(career.challengeBadges).length;
-  app.innerHTML=shell(`<div class="section-title"><div><h1>Trainer Badges</h1><p>${earnedCount} of ${CHALLENGES.length} earned. Badges are permanent on this device.</p></div></div>
+  app.innerHTML=shell(`<div class="section-title"><div><h1>Trainer Badges</h1><p>${earnedCount} of ${CHALLENGES.length} earned. Badges are checked after each completed season and saved on this device.</p></div></div>
     <section class="badge-case">${CHALLENGES.map(ch=>{
       const earned=career.challengeBadges[ch.id];
       return `<article class="challenge-card ${earned?'earned':''}">${trainerBadgeHTML(ch,!!earned,'large')}<div><div class="challenge-status">${earned?'EARNED':'LOCKED'}</div><h2>${ch.name}</h2><p>${ch.description}</p>${earned?`<small>Earned ${formatChampionshipDate(earned.earnedAt)}${earned.titleNumber?` • Title #${earned.titleNumber}`:''}</small>`:''}</div></article>`;
@@ -986,23 +1000,52 @@ function buildSeasonAwards(){
 }
 
 function evaluateChallenges(wonTitle,userStanding,seed,championshipId){
+  if(!state.season?.complete) return [];
   const roster=userTeam().roster.map(pokemonById);
+  const rosterIds=new Set(roster.map(p=>p.id));
   const uniqueTypes=new Set(roster.flatMap(p=>p.types)).size;
   const typeCounts={};
   roster.forEach(p=>p.types.forEach(t=>typeCounts[t]=(typeCounts[t]||0)+1));
+  const userGames=state.season.schedule
+    .filter(g=>g.played && g.result && (g.homeId==='user'||g.awayId==='user'))
+    .sort((a,b)=>a.week-b.week);
+  let winStreak=0, longestWinStreak=0;
+  userGames.forEach(g=>{
+    winStreak=g.result.winnerId==='user'?winStreak+1:0;
+    longestWinStreak=Math.max(longestWinStreak,winStreak);
+  });
+  const hasSweep=userGames.some(g=>{
+    const userIsHome=g.homeId==='user';
+    const userWins=userIsHome?g.result.aWins:g.result.bWins;
+    const opponentWins=userIsHome?g.result.bWins:g.result.aWins;
+    return g.result.winnerId==='user' && userWins===ROSTER_SIZE && opponentWins===0;
+  });
   const passed={
+    first_season:true,
+    playoff_bound:seed!==null && seed>=1 && seed<=4,
+    double_digits:userStanding.w>=10,
+    top_seed:seed===1,
+    clean_sweep:hasSweep,
+    hot_streak:longestWinStreak>=5,
+    league_mvp:state.season.awards?.leagueMvpTeamId==='user',
+    ace_trainer:roster.some(p=>(state.season.playerStats[p.id]?.w || 0)>=12),
     no_legends:wonTitle && roster.every(p=>!LEGENDARY_IDS.has(p.id)),
     professor_oak:wonTitle && uniqueTypes>=6,
     underdogs:wonTitle && roster.every(p=>p.projRank>10),
     kanto_starter:wonTitle && roster.some(p=>KANTO_FINAL_STARTERS.has(p.id)),
     mono_master:wonTitle && Object.values(typeCounts).some(n=>n>=3),
     perfect_season:wonTitle && userStanding.w===14,
-    from_bottom:wonTitle && seed===4
+    from_bottom:wonTitle && seed===4,
+    kanto_trio:wonTitle && [...KANTO_FINAL_STARTERS].every(id=>rosterIds.has(id)),
+    eevee_elite:wonTitle && [...KANTO_EEVEELUTIONS].every(id=>rosterIds.has(id)),
+    pikachu_power:wonTitle && rosterIds.has(25),
+    dynasty:career.championships>=3,
+    century_club:career.totalWins>=100
   };
   const newlyEarned=[];
   CHALLENGES.forEach(ch=>{
     if(passed[ch.id] && !career.challengeBadges[ch.id]){
-      career.challengeBadges[ch.id]={earnedAt:new Date().toISOString(),titleNumber:career.championships||null,championshipId:championshipId||null};
+      career.challengeBadges[ch.id]={earnedAt:new Date().toISOString(),titleNumber:wonTitle?career.championships:null,championshipId:wonTitle?(championshipId||null):null};
       newlyEarned.push(ch.id);
     }
   });
@@ -1856,7 +1899,7 @@ async function init(){
         window.location.reload();
       });
 
-      navigator.serviceWorker.register('./sw.js?v=1.15.3',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw.js?v=1.16.0',{updateViaCache:'none'})
         .then(reg=>{
           const activateNow=worker=>{
             if(worker) worker.postMessage({type:'SKIP_WAITING'});
