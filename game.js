@@ -629,15 +629,28 @@ function calculateWeaknessManagement(roster){
   return clamp(100-danger,0,100);
 }
 function calculateDraftValue(team){
-  const picks=state.draft.log.filter(x=>x.teamId===team.id);
-  const deltas=picks.map(x=>pokemonById(x.pokemonId).projRank-x.overall);
-  return clamp(60-avg(deltas)*2.2,0,100);
+  const picks=(state.draft?.log || []).filter(pick=>pick.teamId===team.id);
+  if(!picks.length) return 80;
+
+  const deltas=picks.map(pick=>{
+    const pokemon=pokemonById(pick.pokemonId);
+    return pokemon ? pokemon.projRank-pick.overall : 0;
+  });
+  const averageReach=avg(deltas);
+
+  // Picking at projected value earns 80. Falling talent earns a bonus.
+  const valueBonus=Math.max(0,-averageReach)*1.25;
+
+  // Allow an average reach of one round before applying a lighter penalty.
+  const reachPenalty=Math.max(0,averageReach-TEAM_COUNT);
+
+  return clamp(80+valueBonus-reachPenalty,0,100);
 }
 function letterGrade(score){
-  if(score>=94)return'A+'; if(score>=90)return'A'; if(score>=87)return'A-';
-  if(score>=84)return'B+'; if(score>=80)return'B'; if(score>=77)return'B-';
-  if(score>=74)return'C+'; if(score>=70)return'C'; if(score>=67)return'C-';
-  if(score>=64)return'D+'; if(score>=60)return'D'; return'F';
+  if(score>=92)return'A+'; if(score>=88)return'A'; if(score>=84)return'A-';
+  if(score>=76)return'B+'; if(score>=72)return'B'; if(score>=68)return'B-';
+  if(score>=64)return'C+'; if(score>=60)return'C'; if(score>=56)return'C-';
+  if(score>=52)return'D+'; if(score>=48)return'D'; return'F';
 }
 
 function renderGrade(){
@@ -1843,7 +1856,7 @@ async function init(){
         window.location.reload();
       });
 
-      navigator.serviceWorker.register('./sw.js?v=1.15.0',{updateViaCache:'none'})
+      navigator.serviceWorker.register('./sw.js?v=1.15.3',{updateViaCache:'none'})
         .then(reg=>{
           const activateNow=worker=>{
             if(worker) worker.postMessage({type:'SKIP_WAITING'});
